@@ -15,7 +15,7 @@ computed, so hashing uses the memory of the message schedule and nothing more.
 
 Both run on the interpreter (63-bit int) and on C. Every intermediate stays
 below 2^62, which is why the interpreter's narrower int still gives the same
-digests; `test` in verify.sh asks both.
+digests; verify.sh asks both.
 
 ## The CLI
 
