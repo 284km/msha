@@ -1,0 +1,95 @@
+// sha1.mere — SHA-1 (FIPS 180-4) over `bytes`, in pure Mere.
+//
+//   sha1_hex  : bytes -> str            the digest of one message
+//   sha1_hex2 : bytes -> bytes -> str   the digest of a ++ b, without making
+//                                       a ++ b
+//
+// The two-part form is for git, whose object id is the SHA-1 of a header
+// ("blob 1234\0") followed by the content: concatenating a megabyte to put
+// ten bytes in front of it costs a megabyte, reading across the boundary costs
+// one comparison per byte.
+//
+// Padding is never built either: the byte at position i of the padded message
+// is computed (message, then 0x80, then zeros, then the bit length), so a
+// message of any length hashes in the memory of the 80-word schedule.
+//
+// ⚠ Every word is kept below 2^32, and that is what makes this correct on the
+// interpreter's 63-bit int as well as the compiled 64-bit one: the widest
+// intermediate is a rotation by 30 of a 32-bit word (< 2^62), and additions
+// are masked after at most five 32-bit terms (< 2^35). `bit_shr` is
+// arithmetic, but on a non-negative word it is the logical shift SHA-1 needs.
+
+let sha1_mask = bit_shl 1 32 - 1;
+let sha1_rotl = fn (n: int) -> fn (x: int) ->
+  bit_and (bit_or (bit_shl x n) (bit_shr x (32 - n))) sha1_mask;
+
+// byte i of the padded message a ++ b (total length la + lb, padded to plen)
+let sha1_byte = fn (a: bytes) -> fn (b: bytes) -> fn (la: int) -> fn (len: int) -> fn (plen: int) -> fn (i: int) ->
+  if i < la then bytes_get a i
+  else if i < len then bytes_get b (i - la)
+  else if i == len then 128
+  else if i < plen - 8 then 0
+  // the bit length, big-endian, in the last 8 bytes
+  else bit_and (bit_shr (len * 8) (8 * (plen - 1 - i))) 255;
+
+let sha1_hex8 = fn (w: int) ->
+  let rec go = fn (i: int) -> fn (acc: str) ->
+    if i == 8 then acc
+    else
+      let d = bit_and (bit_shr w (4 * i)) 15 in
+      go (i + 1) (char_at "0123456789abcdef" d ++ acc) in
+  go 0 "";
+
+let sha1_hex2 = fn (a: bytes) -> fn (b: bytes) ->
+  let la = bytes_len a in
+  let len = la + bytes_len b in
+  let plen = (len + 8) / 64 * 64 + 64 in
+  let at = sha1_byte a b la len plen in
+  let w = vec_new () in
+  let rec fill = fn (i: int) -> if i == 80 then () else let _ = vec_push w 0 in fill (i + 1) in
+  let _ = fill 0 in
+  // one 64-byte block at offset o into the running state (h0..h4)
+  let block = fn (o: int) -> fn (h0: int) -> fn (h1: int) -> fn (h2: int) -> fn (h3: int) -> fn (h4: int) ->
+    let rec load = fn (t: int) ->
+      if t == 16 then ()
+      else
+        let p = o + 4 * t in
+        let _ = vec_set w t (bit_or (bit_or (bit_shl (at p) 24) (bit_shl (at (p + 1)) 16))
+                                    (bit_or (bit_shl (at (p + 2)) 8) (at (p + 3)))) in
+        load (t + 1) in
+    let _ = load 0 in
+    let rec expand = fn (t: int) ->
+      if t == 80 then ()
+      else
+        let x = bit_xor (bit_xor (vec_get w (t - 3)) (vec_get w (t - 8)))
+                        (bit_xor (vec_get w (t - 14)) (vec_get w (t - 16))) in
+        let _ = vec_set w t (sha1_rotl 1 x) in
+        expand (t + 1) in
+    let _ = expand 16 in
+    let rec round = fn (t: int) -> fn (a: int) -> fn (b: int) -> fn (c: int) -> fn (d: int) -> fn (e: int) ->
+      if t == 80 then
+        (bit_and (h0 + a) sha1_mask, bit_and (h1 + b) sha1_mask, bit_and (h2 + c) sha1_mask,
+         bit_and (h3 + d) sha1_mask, bit_and (h4 + e) sha1_mask)
+      else
+        let f =
+          if t < 20 then bit_or (bit_and b c) (bit_and (bit_xor b sha1_mask) d)
+          else if t < 40 then bit_xor (bit_xor b c) d
+          else if t < 60 then bit_or (bit_or (bit_and b c) (bit_and b d)) (bit_and c d)
+          else bit_xor (bit_xor b c) d in
+        let k =
+          if t < 20 then 0x5A827999
+          else if t < 40 then 0x6ED9EBA1
+          else if t < 60 then 0x8F1BBCDC
+          else 0xCA62C1D6 in
+        let tmp = bit_and (sha1_rotl 5 a + f + e + k + vec_get w t) sha1_mask in
+        round (t + 1) tmp a (sha1_rotl 30 b) c d in
+    round 0 h0 h1 h2 h3 h4 in
+  let rec blocks = fn (o: int) -> fn (h0: int) -> fn (h1: int) -> fn (h2: int) -> fn (h3: int) -> fn (h4: int) ->
+    if o == plen then
+      sha1_hex8 h0 ++ sha1_hex8 h1 ++ sha1_hex8 h2 ++ sha1_hex8 h3 ++ sha1_hex8 h4
+    else
+      match block o h0 h1 h2 h3 h4 with
+      | (a, b, c, d, e) -> blocks (o + 64) a b c d e in
+  blocks 0 0x67452301 0xEFCDAB89 0x98BADCFE 0x10325476 0xC3D2E1F0;
+
+let sha1_hex = fn (m: bytes) -> sha1_hex2 (bytes_of_str "") m;

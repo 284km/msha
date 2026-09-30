@@ -1,0 +1,107 @@
+// sha256.mere — SHA-256 (FIPS 180-4) over `bytes`, in pure Mere.
+//
+//   sha256_hex  : bytes -> str
+//   sha256_hex2 : bytes -> bytes -> str   the digest of a ++ b, without a ++ b
+//
+// The arithmetic is examples/sha256.mere's in the mere repo (the program that
+// made the C int 64-bit and brought in the bitwise builtins); what changed is
+// the input -- `bytes`, not `str` -- and the padding, which is computed per
+// byte as in sha1.mere instead of built.
+//
+// ⚠ Words stay below 2^32. The widest intermediate is `bit_shl x (32 - n)` of a
+// 32-bit word, masked at once; sums of up to five words are masked after.
+
+let sha256_mask = bit_shl 1 32 - 1;
+let sha256_rotr = fn (n: int) -> fn (x: int) ->
+  bit_or (bit_shr x n) (bit_and (bit_shl x (32 - n)) sha256_mask);
+
+let sha256_k =
+  let k = vec_new () in
+  let _ = vec_push k 0x428A2F98 in let _ = vec_push k 0x71374491 in let _ = vec_push k 0xB5C0FBCF in let _ = vec_push k 0xE9B5DBA5 in
+  let _ = vec_push k 0x3956C25B in let _ = vec_push k 0x59F111F1 in let _ = vec_push k 0x923F82A4 in let _ = vec_push k 0xAB1C5ED5 in
+  let _ = vec_push k 0xD807AA98 in let _ = vec_push k 0x12835B01 in let _ = vec_push k 0x243185BE in let _ = vec_push k 0x550C7DC3 in
+  let _ = vec_push k 0x72BE5D74 in let _ = vec_push k 0x80DEB1FE in let _ = vec_push k 0x9BDC06A7 in let _ = vec_push k 0xC19BF174 in
+  let _ = vec_push k 0xE49B69C1 in let _ = vec_push k 0xEFBE4786 in let _ = vec_push k 0x0FC19DC6 in let _ = vec_push k 0x240CA1CC in
+  let _ = vec_push k 0x2DE92C6F in let _ = vec_push k 0x4A7484AA in let _ = vec_push k 0x5CB0A9DC in let _ = vec_push k 0x76F988DA in
+  let _ = vec_push k 0x983E5152 in let _ = vec_push k 0xA831C66D in let _ = vec_push k 0xB00327C8 in let _ = vec_push k 0xBF597FC7 in
+  let _ = vec_push k 0xC6E00BF3 in let _ = vec_push k 0xD5A79147 in let _ = vec_push k 0x06CA6351 in let _ = vec_push k 0x14292967 in
+  let _ = vec_push k 0x27B70A85 in let _ = vec_push k 0x2E1B2138 in let _ = vec_push k 0x4D2C6DFC in let _ = vec_push k 0x53380D13 in
+  let _ = vec_push k 0x650A7354 in let _ = vec_push k 0x766A0ABB in let _ = vec_push k 0x81C2C92E in let _ = vec_push k 0x92722C85 in
+  let _ = vec_push k 0xA2BFE8A1 in let _ = vec_push k 0xA81A664B in let _ = vec_push k 0xC24B8B70 in let _ = vec_push k 0xC76C51A3 in
+  let _ = vec_push k 0xD192E819 in let _ = vec_push k 0xD6990624 in let _ = vec_push k 0xF40E3585 in let _ = vec_push k 0x106AA070 in
+  let _ = vec_push k 0x19A4C116 in let _ = vec_push k 0x1E376C08 in let _ = vec_push k 0x2748774C in let _ = vec_push k 0x34B0BCB5 in
+  let _ = vec_push k 0x391C0CB3 in let _ = vec_push k 0x4ED8AA4A in let _ = vec_push k 0x5B9CCA4F in let _ = vec_push k 0x682E6FF3 in
+  let _ = vec_push k 0x748F82EE in let _ = vec_push k 0x78A5636F in let _ = vec_push k 0x84C87814 in let _ = vec_push k 0x8CC70208 in
+  let _ = vec_push k 0x90BEFFFA in let _ = vec_push k 0xA4506CEB in let _ = vec_push k 0xBEF9A3F7 in let _ = vec_push k 0xC67178F2 in
+  k;
+
+let sha256_byte = fn (a: bytes) -> fn (b: bytes) -> fn (la: int) -> fn (len: int) -> fn (plen: int) -> fn (i: int) ->
+  if i < la then bytes_get a i
+  else if i < len then bytes_get b (i - la)
+  else if i == len then 128
+  else if i < plen - 8 then 0
+  else bit_and (bit_shr (len * 8) (8 * (plen - 1 - i))) 255;
+
+let sha256_hex8 = fn (w: int) ->
+  let rec go = fn (i: int) -> fn (acc: str) ->
+    if i == 8 then acc
+    else go (i + 1) (char_at "0123456789abcdef" (bit_and (bit_shr w (4 * i)) 15) ++ acc) in
+  go 0 "";
+
+let sha256_hex2 = fn (a: bytes) -> fn (b: bytes) ->
+  let la = bytes_len a in
+  let len = la + bytes_len b in
+  let plen = (len + 8) / 64 * 64 + 64 in
+  let at = sha256_byte a b la len plen in
+  let w = vec_new () in
+  let rec fill = fn (i: int) -> if i == 64 then () else let _ = vec_push w 0 in fill (i + 1) in
+  let _ = fill 0 in
+  let h = vec_new () in
+  let _ = vec_push h 0x6A09E667 in let _ = vec_push h 0xBB67AE85 in
+  let _ = vec_push h 0x3C6EF372 in let _ = vec_push h 0xA54FF53A in
+  let _ = vec_push h 0x510E527F in let _ = vec_push h 0x9B05688C in
+  let _ = vec_push h 0x1F83D9AB in let _ = vec_push h 0x5BE0CD19 in
+  let block = fn (o: int) ->
+    let rec load = fn (t: int) ->
+      if t == 16 then ()
+      else
+        let p = o + 4 * t in
+        let _ = vec_set w t (bit_or (bit_or (bit_shl (at p) 24) (bit_shl (at (p + 1)) 16))
+                                    (bit_or (bit_shl (at (p + 2)) 8) (at (p + 3)))) in
+        load (t + 1) in
+    let _ = load 0 in
+    let rec expand = fn (t: int) ->
+      if t == 64 then ()
+      else
+        let x15 = vec_get w (t - 15) in
+        let x2 = vec_get w (t - 2) in
+        let s0 = bit_xor (bit_xor (sha256_rotr 7 x15) (sha256_rotr 18 x15)) (bit_shr x15 3) in
+        let s1 = bit_xor (bit_xor (sha256_rotr 17 x2) (sha256_rotr 19 x2)) (bit_shr x2 10) in
+        let _ = vec_set w t (bit_and (vec_get w (t - 16) + s0 + vec_get w (t - 7) + s1) sha256_mask) in
+        expand (t + 1) in
+    let _ = expand 16 in
+    let rec round = fn (t: int) -> fn (a: int) -> fn (b: int) -> fn (c: int) -> fn (d: int) ->
+                    fn (e: int) -> fn (f: int) -> fn (g: int) -> fn (hh: int) ->
+      if t == 64 then
+        let add = fn (i: int) -> fn (x: int) -> vec_set h i (bit_and (vec_get h i + x) sha256_mask) in
+        let _ = add 0 a in let _ = add 1 b in let _ = add 2 c in let _ = add 3 d in
+        let _ = add 4 e in let _ = add 5 f in let _ = add 6 g in add 7 hh
+      else
+        let s1 = bit_xor (bit_xor (sha256_rotr 6 e) (sha256_rotr 11 e)) (sha256_rotr 25 e) in
+        let ch = bit_xor (bit_and e f) (bit_and (bit_xor e sha256_mask) g) in
+        let t1 = bit_and (hh + s1 + ch + vec_get sha256_k t + vec_get w t) sha256_mask in
+        let s0 = bit_xor (bit_xor (sha256_rotr 2 a) (sha256_rotr 13 a)) (sha256_rotr 22 a) in
+        let maj = bit_xor (bit_xor (bit_and a b) (bit_and a c)) (bit_and b c) in
+        let t2 = bit_and (s0 + maj) sha256_mask in
+        round (t + 1) (bit_and (t1 + t2) sha256_mask) a b c (bit_and (d + t1) sha256_mask) e f g in
+    round 0 (vec_get h 0) (vec_get h 1) (vec_get h 2) (vec_get h 3)
+            (vec_get h 4) (vec_get h 5) (vec_get h 6) (vec_get h 7) in
+  let rec blocks = fn (o: int) ->
+    if o == plen then ()
+    else let _ = block o in blocks (o + 64) in
+  let _ = blocks 0 in
+  let rec hex = fn (i: int) -> fn (acc: str) ->
+    if i == 8 then acc else hex (i + 1) (acc ++ sha256_hex8 (vec_get h i)) in
+  hex 0 "";
+
+let sha256_hex = fn (m: bytes) -> sha256_hex2 (bytes_of_str "") m;

@@ -1,0 +1,27 @@
+// msha — print a file's digest, the way `shasum` does.
+//
+//   msha 1 <file>      SHA-1
+//   msha 256 <file>    SHA-256
+//   msha 1s <file> <k>   SHA-1 of the file as two parts, split at byte k
+//   msha 256s <file> <k> the same for SHA-256 (the ...hex2 entry points)
+import "sha1.mere";
+import "sha256.mere";
+
+let main = fn () ->
+  match args () with
+  | Cons (alg, Cons (path, Cons (k_s, _))) ->
+    let m = read_bytes path in
+    let k = int_of_str k_s in
+    let a = bytes_slice m 0 k in
+    let b = bytes_slice m k (bytes_len m - k) in
+    if alg == "1s" then print (sha1_hex2 a b ++ "  " ++ path)
+    else if alg == "256s" then print (sha256_hex2 a b ++ "  " ++ path)
+    else print "usage: msha 1s|256s <file> <k>"
+  | Cons (alg, Cons (path, _)) ->
+    let m = read_bytes path in
+    if alg == "1" then print (sha1_hex m ++ "  " ++ path)
+    else if alg == "256" then print (sha256_hex m ++ "  " ++ path)
+    else print "usage: msha 1|256 <file>"
+  | _ -> print "usage: msha 1|256 <file>";
+let _ = main () in
+exit 0
