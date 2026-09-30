@@ -1,7 +1,7 @@
 #!/bin/sh
 # verify.sh — msha's digests against shasum, on the interpreter and on C.
 #
-#   MERE=/path/to/mere-checkout sh verify.sh [--poison]
+#   MERE=/path/to/mere.exe sh verify.sh [--poison]
 #
 #   every length 0..130     each padding shape: the 0x80 and the length in the
 #                           same block (<= 55), split across two (56..63),
@@ -17,8 +17,11 @@
 # with itself, or one that failed for any reason, would not pass it.
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
-[ -n "${MERE:-}" ] || { echo "usage: MERE=/path/to/mere-checkout sh verify.sh" >&2; exit 2; }
-M="$MERE/_build/default/bin/mere.exe"
+# MERE is the compiler (the convention most verify.sh files follow) or a mere
+# checkout; either works. MERE_ROOT is the checkout when one can be found.
+[ -n "${MERE:-}" ] || { echo "usage: MERE=/path/to/mere.exe (or a mere checkout) sh verify.sh" >&2; exit 2; }
+if [ -d "$MERE" ]; then MERE_ROOT="$MERE"; M="$MERE/_build/default/bin/mere.exe"
+else M="$MERE"; MERE_ROOT="$(cd "$(dirname "$MERE")/../../.." 2>/dev/null && pwd)"; fi
 [ -x "$M" ] || { echo "verify: $M not found (dune build?)" >&2; exit 2; }
 command -v shasum >/dev/null || { echo "verify: shasum not found -- cannot check" >&2; exit 2; }
 CC="${CC:-cc}"
